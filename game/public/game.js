@@ -2,6 +2,8 @@
 const GAME_WIDTH = 800;
 const GAME_HEIGHT = 600;
 const SPRITE_SPEED = 300; // pixels per second
+const EARTH_GRAVITY = 0.1; // Earth gravity in m/s^2, not used in this example but can be used for physics calculations
+const ROCKET_ACCELERATION = 0.2; 
 // Create the application
 const app = new PIXI.Application();
 // Initialize the application
@@ -32,7 +34,7 @@ async function init() {
     // Set the sprite's anchor point to center
     player.anchor.set(0.5);
     
-    // Position the sprite in the center of the screen
+    // Position the sprite in the center of the screen s
     player.x = GAME_WIDTH / 2;
     player.y = GAME_HEIGHT / 2;
     
@@ -99,30 +101,33 @@ async function init() {
         }
     });
     // Game loop with delta time 
+
+    let normal_velocity_x = 0;
+    let normal_velocity_y = 0;
     app.ticker.add((ticker) => {
         // Calculate delta time in seconds
-        const deltaTime = ticker.deltaTime / 60; // Convert from PIXI's delta to seconds
-        const moveDistance = SPRITE_SPEED * deltaTime;
-        // Handle movement with frame-independent speed
-        if (keys.w) {
-            player.y = Math.max(player.height / 2, player.y - moveDistance);
-        }
-        if (keys.s) {
-            player.y = Math.min(GAME_HEIGHT - player.height / 2, player.y + moveDistance);
-        }
-        if (keys.a) {
-            player.x = Math.max(player.width / 2, player.x - moveDistance);
-        }
-        if (keys.d) {
-            player.x = Math.min(GAME_WIDTH - player.width / 2, player.x + moveDistance);
-        }
-        // Add a subtle rotation effect when moving (also frame-independent)
-        const isMoving = keys.w || keys.s || keys.a || keys.d;
+        const deltaTime = ticker.deltaTime; // Convert from PIXI's delta to seconds remember that 1 second is 60
+        const adjusted_sprite_speed = SPRITE_SPEED * deltaTime; // Adjust speed for frame rate
+        const adjusted_gravity = EARTH_GRAVITY * deltaTime; // Adjust gravity for frame rate
+        const adjusted_rocket_acceleration = ROCKET_ACCELERATION * deltaTime; // Adjust rocket acceleration for frame rate
+
+        let adjusted_total_velocity_y = normal_velocity_y * deltaTime; // Adjust total velocity for frame rate
+
+        let adjusted_velocity_y = adjusted_gravity * deltaTime + adjusted_total_velocity_y;
         
+        if (keys.w) {
+            adjusted_velocity_y -= adjusted_rocket_acceleration; // Move up s
+        }
+
+        player.y += adjusted_velocity_y; // Apply gravity to the player
+        //player.x += adjusted_velocity_x
+
+        normal_velocity_y = adjusted_velocity_y / deltaTime; // Update normal velocity for next frame
+        console.log('normal_velocity_y:', normal_velocity_y); 
     });
     
     // Animate background particles with frame-independent timing 
-    app.ticker.add((ticker) => {
+    app.ticker.add((ticker) => { 
         const time = performance.now() * 0.001; // Convert to secondsd
         particles.forEach(particle => {
             particle.alpha = Math.sin(time + particle.x * 0.05) * 0.3 + 0.5; // oscillate whiteness 
