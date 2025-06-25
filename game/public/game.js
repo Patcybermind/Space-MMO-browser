@@ -3,7 +3,7 @@ const GAME_WIDTH = 800;
 const GAME_HEIGHT = 600;
 const SPRITE_SPEED = 300; // pixels per second
 const EARTH_GRAVITY = 0.1; // Earth gravity in m/s^2, not used in this example but can be used for physics calculations
-const ROCKET_ACCELERATION = 0.2; 
+const ROCKET_ACCELERATION = 0.1; 
 const rocket_rotation_speed = 180; // degreess per second
 // Create the application
 const app = new PIXI.Application();
@@ -21,7 +21,7 @@ async function init() {
     
 
 
-    // PLAYER
+    // PLAYER 
     const graphics = new PIXI.Graphics();
     graphics.rect(0, 0, 25, 25);
     graphics.fill(0xff6b6b);
