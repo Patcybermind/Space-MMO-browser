@@ -198,7 +198,7 @@ async function init() {
     // STARS - Enhanced star system with spatial partitioning
     const spatialGrid = new SpatialGrid(GRID_CELL_SIZE);
     const visibleStars = new Set(); // Track currently visible stars for efficient updates
-    const STAR_SANDBOX_SIZE = 500; // Size of the star sandbox area in game widths
+    const STAR_SANDBOX_SIZE = 100; // Size of the star sandbox area in game widths
     const totalStars = 50 * Math.pow((STAR_SANDBOX_SIZE/4), 2) * 4;
     
     console.log(`Creating ${totalStars} stars...`);
