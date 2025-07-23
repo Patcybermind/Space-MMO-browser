@@ -13,11 +13,60 @@ const EARTH_GRAVITY = 9.8; // Earth gravity in m/s^2, not used in this example b
 const STAR_RENDER_DISTANCE = 1200; // Distance at which stars become visible
 const STAR_FADE_DISTANCE = 200; // Additional distance for smooth fade-in/out
 
+// Spatial partitioning variables
+const GRID_CELL_SIZE = 800; // Size of each grid cell (should be >= STAR_RENDER_DISTANCE for efficiency)
+
 // Camera variables
 const CAMERA_SMOOTHING = 0.1; // How smooth the camera follows (0-1, higher = more responsive)
 
 // Create the application
 const app = new PIXI.Application();
+
+// Spatial grid for star management
+class SpatialGrid {
+    constructor(cellSize) {
+        this.cellSize = cellSize;
+        this.grid = new Map(); // Use Map for better performance with string keys
+    }
+    
+    // Convert world coordinates to grid coordinates
+    getGridKey(x, y) {
+        const gridX = Math.floor(x / this.cellSize);
+        const gridY = Math.floor(y / this.cellSize);
+        return `${gridX},${gridY}`;
+    }
+    
+    // Add star to grid
+    addStar(star) {
+        const key = this.getGridKey(star.x, star.y);
+        if (!this.grid.has(key)) {
+            this.grid.set(key, []);
+        }
+        this.grid.get(key).push(star);
+        star.gridKey = key; // Store grid key on star for quick removal
+    }
+    
+    // Get all stars in cells near a position
+    getStarsNear(x, y, radius) {
+        const stars = [];
+        const cellsToCheck = Math.ceil(radius / this.cellSize) + 1;
+        const centerGridX = Math.floor(x / this.cellSize);
+        const centerGridY = Math.floor(y / this.cellSize);
+        
+        // Check surrounding cells
+        for (let dx = -cellsToCheck; dx <= cellsToCheck; dx++) {
+            for (let dy = -cellsToCheck; dy <= cellsToCheck; dy++) {
+                const key = `${centerGridX + dx},${centerGridY + dy}`;
+                const cellStars = this.grid.get(key);
+                if (cellStars) {
+                    stars.push(...cellStars);
+                }
+            }
+        }
+        
+        return stars;
+    }
+}
 
 // Initialize the application
 async function init() {
@@ -65,6 +114,20 @@ async function init() {
     starsText.x = 10;
     starsText.y = 30;
     ui.addChild(starsText);
+
+    // Performance counter
+    const perfText = new PIXI.Text({
+        text: 'Checked: 0',
+        style: {
+            fontFamily: 'Arial',
+            fontSize: 16,
+            fill: 0xffffff,
+            stroke: { color: 0x000000, width: 2 }
+        }
+    });
+    perfText.x = 10;
+    perfText.y = 50;
+    ui.addChild(perfText);
 
     // Create Earth direction arrow
     const arrowGraphics = new PIXI.Graphics();
@@ -132,24 +195,29 @@ async function init() {
     // Add the Earth sprite to the world container
     world.addChild(earth);
 
-    // STARS - Enhanced star system with culling
-    const stars = [];
-    const STAR_SANDBOX_SIZE = 100; // Size of the star sandbox area in game widths
+    // STARS - Enhanced star system with spatial partitioning
+    const spatialGrid = new SpatialGrid(GRID_CELL_SIZE);
+    const visibleStars = new Set(); // Track currently visible stars for efficient updates
+    const STAR_SANDBOX_SIZE = 500; // Size of the star sandbox area in game widths
     const totalStars = 50 * Math.pow((STAR_SANDBOX_SIZE/4), 2) * 4;
     
+    console.log(`Creating ${totalStars} stars...`);
+    
+    // Create all stars and add them to the spatial grid
     for (let i = 0; i < totalStars; i++) {
-        // Create star data object instead of immediately adding to world
         const starData = {
             x: (Math.random() - 0.5) * GAME_WIDTH * STAR_SANDBOX_SIZE,
             y: (Math.random() - 0.5) * GAME_WIDTH * STAR_SANDBOX_SIZE,
             size: Math.random() * 2 + 1,
             baseAlpha: Math.random() * 0.5 + 0.3,
             sprite: null, // Will be created when needed
-            isVisible: false,
-            animationOffset: Math.random() * Math.PI * 2 // For twinkling animations
+            animationOffset: Math.random() * Math.PI * 2 // For twinkling animation
         };
-        stars.push(starData);
+        
+        spatialGrid.addStar(starData);
     }
+    
+    console.log(`Stars created and added to spatial grid.`);
 
     // Function to create a star sprite
     function createStarSprite(starData) {
@@ -165,48 +233,58 @@ async function init() {
         return star;
     }
 
-    // Function to update star visibility based on distance to player
+    // Function to update star visibility using spatial partitioning
     function updateStarVisibility() {
-        let visibleStars = 0;
+        const maxDistance = STAR_RENDER_DISTANCE + STAR_FADE_DISTANCE;
         
-        stars.forEach(starData => {
+        // Get only nearby stars using spatial grid
+        const nearbyStars = spatialGrid.getStarsNear(player.x, player.y, maxDistance);
+        const newVisibleStars = new Set();
+        let starsChecked = nearbyStars.length;
+        
+        // Check distance only for nearby stars
+        nearbyStars.forEach(starData => {
             const dx = starData.x - player.x;
             const dy = starData.y - player.y;
             const distance = Math.sqrt(dx * dx + dy * dy);
             
-            const shouldBeVisible = distance <= (STAR_RENDER_DISTANCE + STAR_FADE_DISTANCE);
-            
-            if (shouldBeVisible && !starData.isVisible) {
-                // Star should become visible
-                if (!starData.sprite) {
-                    createStarSprite(starData);
+            if (distance <= maxDistance) {
+                newVisibleStars.add(starData);
+                
+                // Add to world if not already visible
+                if (!visibleStars.has(starData)) {
+                    if (!starData.sprite) {
+                        createStarSprite(starData);
+                    }
+                    world.addChild(starData.sprite);
                 }
-                world.addChild(starData.sprite);
-                starData.isVisible = true;
-            } else if (!shouldBeVisible && starData.isVisible) {
-                // Star should become invisible
-                if (starData.sprite) {
-                    world.removeChild(starData.sprite);
-                }
-                starData.isVisible = false;
-            }
-            
-            // Update alpha based on distance for smooth fade
-            if (starData.isVisible && starData.sprite) {
+                
+                // Update alpha based on distance for smooth fade
                 if (distance <= STAR_RENDER_DISTANCE) {
-                    // Full opacity within render distance
                     starData.sprite.alpha = starData.baseAlpha;
                 } else {
-                    // Fade out in the fade distance range
                     const fadeProgress = (distance - STAR_RENDER_DISTANCE) / STAR_FADE_DISTANCE;
                     starData.sprite.alpha = starData.baseAlpha * (1 - fadeProgress);
                 }
-                visibleStars++;
             }
         });
         
-        // Update stars counter
-        starsText.text = `Stars: ${visibleStars}/${totalStars}`;
+        // Remove stars that are no longer visible
+        visibleStars.forEach(starData => {
+            if (!newVisibleStars.has(starData)) {
+                if (starData.sprite) {
+                    world.removeChild(starData.sprite);
+                }
+            }
+        });
+        
+        // Update the visible stars set
+        visibleStars.clear();
+        newVisibleStars.forEach(star => visibleStars.add(star));
+        
+        // Update UI counters
+        starsText.text = `Stars: ${visibleStars.size}/${totalStars}`;
+        perfText.text = `Checked: ${starsChecked}`;
     }
 
     // Keyboard state tracking
@@ -254,7 +332,6 @@ async function init() {
         const distance_to_earth = Math.sqrt(Math.pow(player.x - earth.x, 2) + Math.pow(player.y - earth.y, 2));
         const adjusted_gravity = ((EARTH_GRAVITY * 5) / ( 2 * Math.pow(((distance_to_earth + (160)) / 15) , 2))); // Adjust gravity for frame rate
         const adjusted_rocket_acceleration = ROCKET_ACCELERATION * deltaTime; // Adjust rocket acceleration for frame rate
-        console.log(`Distance to Earth: ${distance_to_earth}, Adjusted Gravity: ${adjusted_gravity}, Adjusted Rocket Acceleration: ${adjusted_rocket_acceleration}`);
 
         const gravity_direction_in_radians = Math.atan2(earth.y - player.y, earth.x - player.x); // Calculate the direction to the Earth in radians
         const gravity_strength_y = adjusted_gravity * Math.sin(gravity_direction_in_radians); // Calculate the y component of gravity
@@ -268,7 +345,7 @@ async function init() {
         let adjusted_velocity_y = gravity_strength_y + adjusted_total_velocity_y;
         
         let adjusted_total_velocity_x = normal_velocity_x * deltaTime; // Adjust total velocity for frame rate
-        let adjusted_velocity_x = gravity_strength_x  + adjusted_total_velocity_x;
+        let adjusted_velocity_x = gravity_strength_x + adjusted_total_velocity_x;
 
         if (keys.w) {
             adjusted_velocity_y -= rocket_acceleration_y; // remember that pos value gets bigger as you go down
@@ -383,8 +460,8 @@ async function init() {
     // Animate visible stars with frame-independent timing 
     app.ticker.add((ticker) => { 
         const time = performance.now() * 0.001; // Convert to seconds
-        stars.forEach(starData => {
-            if (starData.isVisible && starData.sprite) {
+        visibleStars.forEach(starData => {
+            if (starData.sprite) {
                 const twinkle = Math.sin(time * 2 + starData.animationOffset) * 0.3 + 0.7;
                 starData.sprite.alpha = starData.sprite.alpha * twinkle;
             }
