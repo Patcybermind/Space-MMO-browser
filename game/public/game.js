@@ -599,7 +599,7 @@ class Game {
     }
 }
 
-// Initialize and start the game
+// Initialize and start the games
 async function init() {
     const game = new Game();
     await game.init();
