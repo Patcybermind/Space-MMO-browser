@@ -1,12 +1,24 @@
 // Game variables
 const GAME_WIDTH = 800;
 const GAME_HEIGHT = 600;
-const SPRITE_SPEED = 300; // pixels per second
-const EARTH_GRAVITY = 0.1; // Earth gravity in m/s^2, not used in this example but can be used for physics calculations
+
 const ROCKET_ACCELERATION = 0.1; 
 const rocket_rotation_speed = 180; // degreess per second
+
+const EARTH_COLOR = 0x009900;
+const EARTH_SIZE = GAME_HEIGHT / 8; // Radius of the Earth in pixels, 100 pixels
+const EARTH_GRAVITY = 9.8; // Earth gravity in m/s^2, not used in this example but can be used for physics calculations
+
+// Star culling variables
+const STAR_RENDER_DISTANCE = 1200; // Distance at which stars become visible
+const STAR_FADE_DISTANCE = 200; // Additional distance for smooth fade-in/out
+
+// Camera variables
+const CAMERA_SMOOTHING = 0.1; // How smooth the camera follows (0-1, higher = more responsive)
+
 // Create the application
 const app = new PIXI.Application();
+
 // Initialize the application
 async function init() {
     await app.init({
@@ -18,12 +30,68 @@ async function init() {
     // Add the canvas to the HTML document
     document.getElementById('gameContainer').appendChild(app.canvas);
 
-    
+    // Create a world container to hold all game objects
+    const world = new PIXI.Container();
+    app.stage.addChild(world);
 
+    // Create UI container for HUD elements (not affected by camera)
+    const ui = new PIXI.Container();
+    app.stage.addChild(ui);
+
+    // Speed indicator
+    const speedText = new PIXI.Text({
+        text: 'Speed: 0',
+        style: {
+            fontFamily: 'Arial',
+            fontSize: 16,
+            fill: 0xffffff,
+            stroke: { color: 0x000000, width: 2 }
+        }
+    });
+    speedText.x = 10;
+    speedText.y = 10;
+    ui.addChild(speedText);
+
+    // Stars rendered counter
+    const starsText = new PIXI.Text({
+        text: 'Stars: 0',
+        style: {
+            fontFamily: 'Arial',
+            fontSize: 16,
+            fill: 0xffffff,
+            stroke: { color: 0x000000, width: 2 }
+        }
+    });
+    starsText.x = 10;
+    starsText.y = 30;
+    ui.addChild(starsText);
+
+    // Create Earth direction arrow
+    const arrowGraphics = new PIXI.Graphics();
+    arrowGraphics.moveTo(-10, 0);   // Left point
+    arrowGraphics.lineTo(10, -8);   // Top right
+    arrowGraphics.lineTo(5, 0);     // Middle right
+    arrowGraphics.lineTo(10, 8);    // Bottom right
+    arrowGraphics.lineTo(-10, 0);   // Close the arrow
+    arrowGraphics.fill(EARTH_COLOR);
+    
+    const arrowTexture = app.renderer.generateTexture(arrowGraphics);
+    const earthArrow = new PIXI.Sprite(arrowTexture);
+    earthArrow.anchor.set(0.5);
+    earthArrow.visible = false;
+    ui.addChild(earthArrow);
+
+    // Camera target position
+    let cameraX = 0;
+    let cameraY = 0;
 
     // PLAYER 
     const graphics = new PIXI.Graphics();
-    graphics.rect(0, 0, 25, 25);
+    // Draw a triangle pointing to the left (matches thrust direction)
+    graphics.moveTo(-15, 0);   // Left point (nose)
+    graphics.lineTo(15, -10);  // Bottom right
+    graphics.lineTo(15, 10);   // Top right
+    graphics.lineTo(-15, 0);   // Close the triangle
     graphics.fill(0xff6b6b);
     graphics.stroke({ width: 2, color: 0xffffff });
     // Create a texture from the graphics
@@ -40,15 +108,15 @@ async function init() {
     player.y = GAME_HEIGHT / 4;
     
     player.zIndex = 2;
-    // Add the sprite to the stage
-    app.stage.addChild(player);
+    // Add the sprite to the world container instead of stage
+    world.addChild(player);
 
     // EARTH
     // Create a new graphics object for the Earth
     const earthGraphics = new PIXI.Graphics();
     // Draw a circle to represent the Earth
-    earthGraphics.circle(0, 0, GAME_HEIGHT / 10); 
-    earthGraphics.fill(0x009900); 
+    earthGraphics.circle(0, 0, EARTH_SIZE); 
+    earthGraphics.fill(EARTH_COLOR); 
     // Create a texture from the Earth graphics - THIS IS THE FIX
     const earthTexture = app.renderer.generateTexture(earthGraphics);
     // Create the Earth sprite from the texture
@@ -61,23 +129,85 @@ async function init() {
     
     // set in front of stars
     earth.zIndex = 1;
-    // Add the Earth sprite to the stage
-    app.stage.addChild(earth);
+    // Add the Earth sprite to the world container
+    world.addChild(earth);
 
-    // STARS
-    // Add some stars
-    const particles = [];
-    for (let i = 0; i < 50; i++) {
-        const star = new PIXI.Graphics();
-        star.circle(0, 0, Math.random() * 2 + 1);
-        star.fill(0xffffff);
-        star.x = Math.random() * GAME_WIDTH;
-        star.y = Math.random() * GAME_HEIGHT;
-        star.alpha = Math.random() * 0.5 + 0.3;
-        app.stage.addChild(star);
-        particles.push(star);
+    // STARS - Enhanced star system with culling
+    const stars = [];
+    const STAR_SANDBOX_SIZE = 100; // Size of the star sandbox area in game widths
+    const totalStars = 50 * Math.pow((STAR_SANDBOX_SIZE/4), 2) * 4;
+    
+    for (let i = 0; i < totalStars; i++) {
+        // Create star data object instead of immediately adding to world
+        const starData = {
+            x: (Math.random() - 0.5) * GAME_WIDTH * STAR_SANDBOX_SIZE,
+            y: (Math.random() - 0.5) * GAME_WIDTH * STAR_SANDBOX_SIZE,
+            size: Math.random() * 2 + 1,
+            baseAlpha: Math.random() * 0.5 + 0.3,
+            sprite: null, // Will be created when needed
+            isVisible: false,
+            animationOffset: Math.random() * Math.PI * 2 // For twinkling animations
+        };
+        stars.push(starData);
     }
 
+    // Function to create a star sprite
+    function createStarSprite(starData) {
+        if (starData.sprite) return starData.sprite; // Already created
+        
+        const star = new PIXI.Graphics();
+        star.circle(0, 0, starData.size);
+        star.fill(0xffffff);
+        star.x = starData.x;
+        star.y = starData.y;
+        star.alpha = starData.baseAlpha;
+        starData.sprite = star;
+        return star;
+    }
+
+    // Function to update star visibility based on distance to player
+    function updateStarVisibility() {
+        let visibleStars = 0;
+        
+        stars.forEach(starData => {
+            const dx = starData.x - player.x;
+            const dy = starData.y - player.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            
+            const shouldBeVisible = distance <= (STAR_RENDER_DISTANCE + STAR_FADE_DISTANCE);
+            
+            if (shouldBeVisible && !starData.isVisible) {
+                // Star should become visible
+                if (!starData.sprite) {
+                    createStarSprite(starData);
+                }
+                world.addChild(starData.sprite);
+                starData.isVisible = true;
+            } else if (!shouldBeVisible && starData.isVisible) {
+                // Star should become invisible
+                if (starData.sprite) {
+                    world.removeChild(starData.sprite);
+                }
+                starData.isVisible = false;
+            }
+            
+            // Update alpha based on distance for smooth fade
+            if (starData.isVisible && starData.sprite) {
+                if (distance <= STAR_RENDER_DISTANCE) {
+                    // Full opacity within render distance
+                    starData.sprite.alpha = starData.baseAlpha;
+                } else {
+                    // Fade out in the fade distance range
+                    const fadeProgress = (distance - STAR_RENDER_DISTANCE) / STAR_FADE_DISTANCE;
+                    starData.sprite.alpha = starData.baseAlpha * (1 - fadeProgress);
+                }
+                visibleStars++;
+            }
+        });
+        
+        // Update stars counter
+        starsText.text = `Stars: ${visibleStars}/${totalStars}`;
+    }
 
     // Keyboard state tracking
     const keys = {
@@ -110,66 +240,159 @@ async function init() {
 
     // GAME LOOP
     app.ticker.add((ticker) => {
-    const deltaTime = ticker.deltaTime; // Convert from PIXI's delta to seconds remember that 1 second is 60
+        const deltaTime = ticker.deltaTime; // Convert from PIXI's delta to seconds remember that 1 second is 60
 
-    if (keys.a) {
-        rocket_orientation -= rocket_rotation_speed * (deltaTime/60); // Rotate left
-        player.rotation = rocket_orientation * (Math.PI / 180); // Set rotation in radians
+        if (keys.a) {
+            rocket_orientation -= rocket_rotation_speed * (deltaTime/60); // Rotate left
+            player.rotation = rocket_orientation * (Math.PI / 180); // Set rotation in radians
+        }
+        if (keys.d) {
+            rocket_orientation += rocket_rotation_speed * (deltaTime/60); // Rotate right
+            player.rotation = rocket_orientation * (Math.PI / 180); // Set rotation in radians
+        }
 
-    }
-    if (keys.d) {
-        rocket_orientation += rocket_rotation_speed * (deltaTime/60); // Rotate right
-        player.rotation = rocket_orientation * (Math.PI / 180); // Set rotation in radians
+        const distance_to_earth = Math.sqrt(Math.pow(player.x - earth.x, 2) + Math.pow(player.y - earth.y, 2));
+        const adjusted_gravity = ((EARTH_GRAVITY * 5) / ( 2 * Math.pow(((distance_to_earth + (160)) / 15) , 2))); // Adjust gravity for frame rate
+        const adjusted_rocket_acceleration = ROCKET_ACCELERATION * deltaTime; // Adjust rocket acceleration for frame rate
+        console.log(`Distance to Earth: ${distance_to_earth}, Adjusted Gravity: ${adjusted_gravity}, Adjusted Rocket Acceleration: ${adjusted_rocket_acceleration}`);
 
-    }
-
-    const distance_to_earth = Math.sqrt(Math.pow(player.x - earth.x, 2) + Math.pow(player.y - earth.y, 2));
-    const adjusted_sprite_speed = SPRITE_SPEED * deltaTime; // Adjust speed for frame rate
-    const adjusted_gravity = (EARTH_GRAVITY / ( 0.2 * Math.pow((distance_to_earth) / 50 , 2))); // Adjust gravity for frame rate
-    const adjusted_rocket_acceleration = ROCKET_ACCELERATION * deltaTime; // Adjust rocket acceleration for frame rate
-    console.log(`Distance to Earth: ${distance_to_earth}, Adjusted Gravity: ${adjusted_gravity}, Adjusted Rocket Acceleration: ${adjusted_rocket_acceleration}`);
-
-    const gravity_direction_in_radians = Math.atan2(earth.y - player.y, earth.x - player.x); // Calculate the direction to the Earth in radians
-    const gravity_strength_y = adjusted_gravity * Math.sin(gravity_direction_in_radians); // Calculate the y component of gravity
-    const gravity_strength_x = adjusted_gravity * Math.cos(gravity_direction_in_radians); // Calculate the x component of gravity
-    
-    const rocket_acceleration_x = adjusted_rocket_acceleration * Math.cos(player.rotation); // Calculate the x component of rocket acceleration
-    const rocket_acceleration_y = adjusted_rocket_acceleration * Math.sin(player.rotation); //
-    // calculate gravity and its orientation 
-    
-    
-    let adjusted_total_velocity_y = normal_velocity_y * deltaTime; // Adjust total velocity for frame rate
-    let adjusted_velocity_y = gravity_strength_y + adjusted_total_velocity_y;
-    
-    let adjusted_total_velocity_x = normal_velocity_x * deltaTime; // Adjust total velocity for frame rate
-    let adjusted_velocity_x = gravity_strength_x  + adjusted_total_velocity_x;
-    
-
-    if (keys.w) {
-        adjusted_velocity_y -= rocket_acceleration_y; // remember that pos value gets bigger as you go down
-        adjusted_velocity_x -= rocket_acceleration_x; // Apply rocket acceleration in the x direction
-    }
-    player.y += adjusted_velocity_y; // Apply gravity to the player 
-    //player.x += adjusted_velocity_x
-    normal_velocity_y = adjusted_velocity_y / deltaTime; // Update normal velocity for next frame
- 
+        const gravity_direction_in_radians = Math.atan2(earth.y - player.y, earth.x - player.x); // Calculate the direction to the Earth in radians
+        const gravity_strength_y = adjusted_gravity * Math.sin(gravity_direction_in_radians); // Calculate the y component of gravity
+        const gravity_strength_x = adjusted_gravity * Math.cos(gravity_direction_in_radians); // Calculate the x component of gravity
         
-    
-  
+        const rocket_acceleration_x = adjusted_rocket_acceleration * Math.cos(player.rotation); // Calculate the x component of rocket acceleration
+        const rocket_acceleration_y = adjusted_rocket_acceleration * Math.sin(player.rotation); //
+        // calculate gravity and its orientation 
+        
+        let adjusted_total_velocity_y = normal_velocity_y * deltaTime; // Adjust total velocity for frame rate
+        let adjusted_velocity_y = gravity_strength_y + adjusted_total_velocity_y;
+        
+        let adjusted_total_velocity_x = normal_velocity_x * deltaTime; // Adjust total velocity for frame rate
+        let adjusted_velocity_x = gravity_strength_x  + adjusted_total_velocity_x;
 
+        if (keys.w) {
+            adjusted_velocity_y -= rocket_acceleration_y; // remember that pos value gets bigger as you go down
+            adjusted_velocity_x -= rocket_acceleration_x; // Apply rocket acceleration in the x direction
+        }
+        
+        player.y += adjusted_velocity_y; // Apply gravity to the player 
+        player.x += adjusted_velocity_x; // Apply gravity to the player
+        
+        normal_velocity_y = adjusted_velocity_y / deltaTime; // Update normal velocity for next frame
+        normal_velocity_x = adjusted_velocity_x / deltaTime; // Update normal velocity for next frame
 
-    player.x += adjusted_velocity_x; // Apply gravity to the player
-    //player.x += adjusted_velocity_x
-    normal_velocity_x = adjusted_velocity_x / deltaTime; // Update normal velocity for next frame
-  
+        // Calculate and display speed
+        const currentSpeed = Math.sqrt(normal_velocity_x * normal_velocity_x + normal_velocity_y * normal_velocity_y);
+        speedText.text = `Speed: ${(Math.round((currentSpeed)* 5)) / 5} m/s`; // Round to 2 decimal places
+
+        // Update star visibility based on player position
+        updateStarVisibility();
+
+        // Camera following logic
+        // Calculate target camera position (center player on screen)
+        const targetCameraX = GAME_WIDTH / 2 - player.x;
+        const targetCameraY = GAME_HEIGHT / 2 - player.y;
+        
+        // Smooth camera movement using linear interpolation
+        cameraX += (targetCameraX - cameraX) * CAMERA_SMOOTHING;
+        cameraY += (targetCameraY - cameraY) * CAMERA_SMOOTHING;
+        
+        // Update Earth direction arrow
+        const earthScreenX = earth.x + cameraX;
+        const earthScreenY = earth.y + cameraY;
+        const earthOnScreen = earthScreenX > -EARTH_SIZE && earthScreenX < GAME_WIDTH + EARTH_SIZE && 
+                             earthScreenY > -EARTH_SIZE && earthScreenY < GAME_HEIGHT + EARTH_SIZE;
+        
+        if (!earthOnScreen) {
+            earthArrow.visible = true;
+            
+            // Calculate direction to Earth from screen center
+            const dirX = earthScreenX - GAME_WIDTH / 2;
+            const dirY = earthScreenY - GAME_HEIGHT / 2;
+            const dirLength = Math.sqrt(dirX * dirX + dirY * dirY);
+            const normalizedDirX = dirX / dirLength;
+            const normalizedDirY = dirY / dirLength;
+            
+            // Find intersection with screen border
+            const margin = 30; // Distance from screen edge
+            let arrowX, arrowY;
+            
+            // Check which border the arrow should be on
+            const absX = Math.abs(normalizedDirX);
+            const absY = Math.abs(normalizedDirY);
+            
+            if (absX > absY) {
+                // Arrow should be on left or right border
+                if (normalizedDirX > 0) {
+                    arrowX = GAME_WIDTH - margin;
+                    arrowY = GAME_HEIGHT / 2 + (normalizedDirY / normalizedDirX) * (GAME_WIDTH / 2 - margin);
+                } else {
+                    arrowX = margin;
+                    arrowY = GAME_HEIGHT / 2 - (normalizedDirY / normalizedDirX) * (GAME_WIDTH / 2 - margin);
+                }
+            } else {
+                // Arrow should be on top or bottom border
+                if (normalizedDirY > 0) {
+                    arrowY = GAME_HEIGHT - margin;
+                    arrowX = GAME_WIDTH / 2 + (normalizedDirX / normalizedDirY) * (GAME_HEIGHT / 2 - margin);
+                } else {
+                    arrowY = margin;
+                    arrowX = GAME_WIDTH / 2 - (normalizedDirX / normalizedDirY) * (GAME_HEIGHT / 2 - margin);
+                }
+            }
+            
+            // Clamp arrow position to screen bounds
+            arrowX = Math.max(margin, Math.min(GAME_WIDTH - margin, arrowX));
+            arrowY = Math.max(margin, Math.min(GAME_HEIGHT - margin, arrowY));
+            
+            earthArrow.x = arrowX;
+            earthArrow.y = arrowY;
+            earthArrow.rotation = Math.atan2(normalizedDirY, normalizedDirX) + Math.PI;
+        } else {
+            earthArrow.visible = false;
+        }
+        
+        // Collision detection with Earth
+        const earthRadius = EARTH_SIZE; // Same as Earth's drawn radius
+        const playerRadius = 12; // Approximate radius of the triangle sprite
+        const collisionDistance = earthRadius + playerRadius;
+        
+        if (distance_to_earth <= collisionDistance) {
+            // Calculate collision normal (direction from Earth center to player)
+            const normalX = (player.x - earth.x) / distance_to_earth;
+            const normalY = (player.y - earth.y) / distance_to_earth;
+            
+            // Push player out of Earth to prevent overlap
+            player.x = earth.x + normalX * collisionDistance;
+            player.y = earth.y + normalY * collisionDistance;
+            
+            // Calculate velocity reflection
+            const dotProduct = normal_velocity_x * normalX + normal_velocity_y * normalY;
+            const bounceStrength = 0.5; // How much velocity is retained after bounce (0-1)
+            
+            // Reflect velocity with energy loss
+            normal_velocity_x = (normal_velocity_x - 2 * dotProduct * normalX) * bounceStrength;
+            normal_velocity_y = (normal_velocity_y - 2 * dotProduct * normalY) * bounceStrength;
+        }
+
+        // Apply camera position to world container
+        world.x = cameraX;
+        world.y = cameraY;
     });
-    // Animate background particles with frame-independent timing 
+    
+    // Animate visible stars with frame-independent timing 
     app.ticker.add((ticker) => { 
-        const time = performance.now() * 0.001; // Convert to secondsd
-        particles.forEach(particle => {
-            particle.alpha = Math.sin(time + particle.x * 0.05) * 0.3 + 0.5; // oscillate whiteness 
+        const time = performance.now() * 0.001; // Convert to seconds
+        stars.forEach(starData => {
+            if (starData.isVisible && starData.sprite) {
+                const twinkle = Math.sin(time * 2 + starData.animationOffset) * 0.3 + 0.7;
+                starData.sprite.alpha = starData.sprite.alpha * twinkle;
+            }
         });
     });
+
+    // Initial star visibility update
+    updateStarVisibility();
 }
 // Start the game
 init().catch(console.error);
