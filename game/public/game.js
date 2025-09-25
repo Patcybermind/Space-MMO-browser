@@ -28,6 +28,34 @@ const CONFIG = {
     }
 };
 
+// Add to CONFIG for more planets
+const PLANETS = [
+    {
+        name: "Earth",
+        color: 0x009900,
+        size: 75,
+        gravity: 9.8,
+        x: CONFIG.GAME.WIDTH / 2,
+        y: CONFIG.GAME.HEIGHT / 2
+    },
+    {
+        name: "Mars",
+        color: 0xff4500,
+        size: 55,
+        gravity: 3.7,
+        x: CONFIG.GAME.WIDTH / 2 + 350,
+        y: CONFIG.GAME.HEIGHT / 2 - 200
+    },
+    {
+        name: "Neptune",
+        color: 0x4169e1,
+        size: 90,
+        gravity: 11.2,
+        x: CONFIG.GAME.WIDTH / 2 - 500,
+        y: CONFIG.GAME.HEIGHT / 2 + 300
+    }
+];
+
 // Spatial Grid Class for efficient star management
 class SpatialGrid {
     constructor(cellSize) {
@@ -118,21 +146,25 @@ class Player {
         return { x: -thrustX, y: -thrustY }; // Negative because we want to thrust forward
     }
     
-    applyGravity(earth, deltaTime) {
-        const dx = earth.x - this.x;
-        const dy = earth.y - this.y;
-        const distance = Math.sqrt(dx * dx + dy * dy);
-        
-        const adjustedGravity = ((CONFIG.EARTH.GRAVITY * 5) / (2 * Math.pow(((distance + 160) / 15), 2)));
-        const gravityDirection = Math.atan2(dy, dx);
-        
-        return {
-            x: adjustedGravity * Math.cos(gravityDirection),
-            y: adjustedGravity * Math.sin(gravityDirection)
-        };
+    applyGravity(planets, deltaTime) {
+        let totalGravityX = 0;
+        let totalGravityY = 0;
+        planets.forEach(planet => {
+            const dx = planet.x - this.x;
+            const dy = planet.y - this.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+
+            // Use each planet's gravity and size
+            const adjustedGravity = ((planet.gravity * 5) / (2 * Math.pow(((distance + 160) / 15), 2)));
+            const gravityDirection = Math.atan2(dy, dx);
+
+            totalGravityX += adjustedGravity * Math.cos(gravityDirection);
+            totalGravityY += adjustedGravity * Math.sin(gravityDirection);
+        });
+        return { x: totalGravityX, y: totalGravityY };
     }
     
-    update(deltaTime, earth, inputManager) {
+    update(deltaTime, planets, inputManager) {
         // Handle rotation
         if (inputManager.isPressed('a')) {
             this.rotate(-1, deltaTime);
@@ -141,8 +173,8 @@ class Player {
             this.rotate(1, deltaTime);
         }
         
-        // Apply gravity
-        const gravity = this.applyGravity(earth, deltaTime);
+        // Apply gravity from all planets
+        const gravity = this.applyGravity(planets, deltaTime);
         let accelerationX = gravity.x;
         let accelerationY = gravity.y;
         
@@ -165,30 +197,32 @@ class Player {
         this.sprite.y = this.y;
     }
     
-    checkCollisionWithEarth(earth) {
-        const dx = this.x - earth.x;
-        const dy = this.y - earth.y;
-        const distance = Math.sqrt(dx * dx + dy * dy);
-        const collisionDistance = CONFIG.EARTH.SIZE + CONFIG.ROCKET.RADIUS;
-        
-        if (distance <= collisionDistance) {
-            // Calculate collision normal
-            const normalX = dx / distance;
-            const normalY = dy / distance;
-            
-            // Push player out of Earth
-            this.x = earth.x + normalX * collisionDistance;
-            this.y = earth.y + normalY * collisionDistance;
-            this.sprite.x = this.x;
-            this.sprite.y = this.y;
-            
-            // Reflect velocity with energy loss
-            const dotProduct = this.velocityX * normalX + this.velocityY * normalY;
-            const bounceStrength = 0.5;
-            
-            this.velocityX = (this.velocityX - 2 * dotProduct * normalX) * bounceStrength;
-            this.velocityY = (this.velocityY - 2 * dotProduct * normalY) * bounceStrength;
-        }
+    checkCollisionWithPlanets(planets) {
+        planets.forEach(planet => {
+            const dx = this.x - planet.x;
+            const dy = this.y - planet.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            const collisionDistance = planet.size + CONFIG.ROCKET.RADIUS;
+
+            if (distance <= collisionDistance) {
+                // Calculate collision normal
+                const normalX = dx / distance;
+                const normalY = dy / distance;
+                
+                // Push player out of planet
+                this.x = planet.x + normalX * collisionDistance;
+                this.y = planet.y + normalY * collisionDistance;
+                this.sprite.x = this.x;
+                this.sprite.y = this.y;
+                
+                // Reflect velocity with energy loss
+                const dotProduct = this.velocityX * normalX + this.velocityY * normalY;
+                const bounceStrength = 0.5;
+                
+                this.velocityX = (this.velocityX - 2 * dotProduct * normalX) * bounceStrength;
+                this.velocityY = (this.velocityY - 2 * dotProduct * normalY) * bounceStrength;
+            }
+        });
     }
     
     getSpeed() {
@@ -196,30 +230,34 @@ class Player {
     }
 }
 
-// Earth Class
-class Earth {
-    constructor(app, world, x, y) {
+// Planet Class
+class Planet {
+    constructor(app, world, planetData) {
         this.app = app;
         this.world = world;
-        this.x = x;
-        this.y = y;
+        this.x = planetData.x;
+        this.y = planetData.y;
+        this.size = planetData.size;
+        this.color = planetData.color;
+        this.gravity = planetData.gravity;
+        this.name = planetData.name;
         this.sprite = null;
-        
+
         this.createSprite();
     }
-    
+
     createSprite() {
         const graphics = new PIXI.Graphics();
-        graphics.circle(0, 0, CONFIG.EARTH.SIZE);
-        graphics.fill(CONFIG.EARTH.COLOR);
-        
+        graphics.circle(0, 0, this.size);
+        graphics.fill(this.color);
+
         const texture = this.app.renderer.generateTexture(graphics);
         this.sprite = new PIXI.Sprite(texture);
         this.sprite.anchor.set(0.5);
         this.sprite.x = this.x;
         this.sprite.y = this.y;
         this.sprite.zIndex = 1;
-        
+
         this.world.addChild(this.sprite);
     }
 }
@@ -529,13 +567,13 @@ class Game {
         this.world = null;
         this.ui = null;
         this.player = null;
-        this.earth = null;
+        this.planets = [];
         this.starSystem = null;
         this.inputManager = null;
         this.camera = null;
         this.uiManager = null;
     }
-    
+
     async init() {
         await this.app.init({
             width: CONFIG.GAME.WIDTH,
@@ -543,55 +581,57 @@ class Game {
             backgroundColor: CONFIG.GAME.BACKGROUND_COLOR,
             antialias: true
         });
-        
+
         document.getElementById('gameContainer').appendChild(this.app.canvas);
-        
+
         this.setupContainers();
         this.createGameObjects();
         this.setupGameLoop();
     }
-    
+
     setupContainers() {
         this.world = new PIXI.Container();
         this.ui = new PIXI.Container();
         this.app.stage.addChild(this.world);
         this.app.stage.addChild(this.ui);
     }
-    
+
     createGameObjects() {
-        // Create game objects
-        this.player = new Player(this.app, this.world, CONFIG.GAME.WIDTH / 4, CONFIG.GAME.HEIGHT / 4);
-        this.earth = new Earth(this.app, this.world, CONFIG.GAME.WIDTH / 2, CONFIG.GAME.HEIGHT / 2);
+        // Create planets
+        this.planets = PLANETS.map(data => new Planet(this.app, this.world, data));
+        // Use the first planet as the starting point for the player
+        this.player = new Player(this.app, this.world, PLANETS[0].x - 200, PLANETS[0].y - 100);
         this.starSystem = new StarSystem(this.app, this.world);
-        
+
         // Create systems
         this.inputManager = new InputManager();
         this.camera = new Camera(this.world);
         this.uiManager = new UIManager(this.app, this.ui);
-        
+
         // Initial star visibility update
         this.starSystem.updateVisibility(this.player.x, this.player.y);
     }
-    
+
     setupGameLoop() {
         // Main game loop
         this.app.ticker.add((ticker) => {
             const deltaTime = ticker.deltaTime;
-            
+
             // Update game objects
-            this.player.update(deltaTime, this.earth, this.inputManager);
-            this.player.checkCollisionWithEarth(this.earth);
-            
+            this.player.update(deltaTime, this.planets, this.inputManager);
+            this.player.checkCollisionWithPlanets(this.planets);
+
             // Update systems
             this.camera.follow(this.player);
             const starStats = this.starSystem.updateVisibility(this.player.x, this.player.y);
-            
+
             // Update UI
             this.uiManager.updateSpeed(this.player.getSpeed());
             this.uiManager.updateStarCount(starStats.visible, starStats.total, starStats.checked);
-            this.uiManager.updateEarthArrow(this.earth, this.camera);
+            // Optionally, update arrow for the closest planet
+            this.uiManager.updateEarthArrow(this.planets[0], this.camera);
         });
-        
+
         // Star animation loop
         this.app.ticker.add(() => {
             this.starSystem.animate();
