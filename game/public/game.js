@@ -43,16 +43,32 @@ const PLANETS = [
         color: 0xff4500,
         size: 55,
         gravity: 3.7,
-        x: CONFIG.GAME.WIDTH / 2 + 350,
-        y: CONFIG.GAME.HEIGHT / 2 - 200
+        x: CONFIG.GAME.WIDTH / 2 + 800, // spaced further
+        y: CONFIG.GAME.HEIGHT / 2 - 600
     },
     {
         name: "Neptune",
         color: 0x4169e1,
         size: 90,
         gravity: 11.2,
-        x: CONFIG.GAME.WIDTH / 2 - 500,
-        y: CONFIG.GAME.HEIGHT / 2 + 300
+        x: CONFIG.GAME.WIDTH / 2 - 1200, // spaced further
+        y: CONFIG.GAME.HEIGHT / 2 + 900
+    },
+    {
+        name: "Venus",
+        color: 0xeccc68,
+        size: 60,
+        gravity: 8.87,
+        x: CONFIG.GAME.WIDTH / 2 + 1500,
+        y: CONFIG.GAME.HEIGHT / 2 + 1000
+    },
+    {
+        name: "Jupiter",
+        color: 0xf7b731,
+        size: 120,
+        gravity: 24.8,
+        x: CONFIG.GAME.WIDTH / 2 - 2000,
+        y: CONFIG.GAME.HEIGHT / 2 - 1200
     }
 ];
 
@@ -431,7 +447,7 @@ class UIManager {
         this.app = app;
         this.ui = ui;
         this.elements = {};
-        
+        this.planetArrows = [];
         this.createUI();
     }
     
@@ -480,8 +496,34 @@ class UIManager {
         
         // Earth direction arrow
         this.createEarthArrow();
+        
+        // Create arrows for all planets
+        this.createPlanetArrows();
     }
-    
+
+    createPlanetArrows() {
+        // Remove old arrows if any
+        this.planetArrows.forEach(arrow => this.ui.removeChild(arrow));
+        this.planetArrows = [];
+
+        PLANETS.forEach(planet => {
+            const arrowGraphics = new PIXI.Graphics();
+            arrowGraphics.moveTo(-10, 0);
+            arrowGraphics.lineTo(10, -8);
+            arrowGraphics.lineTo(5, 0);
+            arrowGraphics.lineTo(10, 8);
+            arrowGraphics.lineTo(-10, 0);
+            arrowGraphics.fill(planet.color);
+
+            const arrowTexture = this.app.renderer.generateTexture(arrowGraphics);
+            const arrowSprite = new PIXI.Sprite(arrowTexture);
+            arrowSprite.anchor.set(0.5);
+            arrowSprite.visible = false;
+            this.ui.addChild(arrowSprite);
+            this.planetArrows.push(arrowSprite);
+        });
+    }
+
     createEarthArrow() {
         const arrowGraphics = new PIXI.Graphics();
         arrowGraphics.moveTo(-10, 0);
@@ -507,56 +549,61 @@ class UIManager {
         this.elements.perfText.text = `Checked: ${checked}`;
     }
     
-    updateEarthArrow(earth, camera) {
-        const earthScreenX = earth.x + camera.x;
-        const earthScreenY = earth.y + camera.y;
-        const earthOnScreen = earthScreenX > -CONFIG.EARTH.SIZE && 
-                             earthScreenX < CONFIG.GAME.WIDTH + CONFIG.EARTH.SIZE && 
-                             earthScreenY > -CONFIG.EARTH.SIZE && 
-                             earthScreenY < CONFIG.GAME.HEIGHT + CONFIG.EARTH.SIZE;
-        
-        if (!earthOnScreen) {
-            this.elements.earthArrow.visible = true;
-            
-            const dirX = earthScreenX - CONFIG.GAME.WIDTH / 2;
-            const dirY = earthScreenY - CONFIG.GAME.HEIGHT / 2;
-            const dirLength = Math.sqrt(dirX * dirX + dirY * dirY);
-            const normalizedDirX = dirX / dirLength;
-            const normalizedDirY = dirY / dirLength;
-            
-            const margin = 30;
-            let arrowX, arrowY;
-            
-            const absX = Math.abs(normalizedDirX);
-            const absY = Math.abs(normalizedDirY);
-            
-            if (absX > absY) {
-                if (normalizedDirX > 0) {
-                    arrowX = CONFIG.GAME.WIDTH - margin;
-                    arrowY = CONFIG.GAME.HEIGHT / 2 + (normalizedDirY / normalizedDirX) * (CONFIG.GAME.WIDTH / 2 - margin);
+    updatePlanetArrows(planets, camera) {
+        planets.forEach((planet, idx) => {
+            const arrow = this.planetArrows[idx];
+            if (!arrow) return;
+
+            const planetScreenX = planet.x + camera.x;
+            const planetScreenY = planet.y + camera.y;
+            const planetOnScreen = planetScreenX > -planet.size &&
+                                   planetScreenX < CONFIG.GAME.WIDTH + planet.size &&
+                                   planetScreenY > -planet.size &&
+                                   planetScreenY < CONFIG.GAME.HEIGHT + planet.size;
+
+            if (!planetOnScreen) {
+                arrow.visible = true;
+
+                const dirX = planetScreenX - CONFIG.GAME.WIDTH / 2;
+                const dirY = planetScreenY - CONFIG.GAME.HEIGHT / 2;
+                const dirLength = Math.sqrt(dirX * dirX + dirY * dirY);
+                const normalizedDirX = dirX / dirLength;
+                const normalizedDirY = dirY / dirLength;
+
+                const margin = 30;
+                let arrowX, arrowY;
+
+                const absX = Math.abs(normalizedDirX);
+                const absY = Math.abs(normalizedDirY);
+
+                if (absX > absY) {
+                    if (normalizedDirX > 0) {
+                        arrowX = CONFIG.GAME.WIDTH - margin;
+                        arrowY = CONFIG.GAME.HEIGHT / 2 + (normalizedDirY / normalizedDirX) * (CONFIG.GAME.WIDTH / 2 - margin);
+                    } else {
+                        arrowX = margin;
+                        arrowY = CONFIG.GAME.HEIGHT / 2 - (normalizedDirY / normalizedDirX) * (CONFIG.GAME.WIDTH / 2 - margin);
+                    }
                 } else {
-                    arrowX = margin;
-                    arrowY = CONFIG.GAME.HEIGHT / 2 - (normalizedDirY / normalizedDirX) * (CONFIG.GAME.WIDTH / 2 - margin);
+                    if (normalizedDirY > 0) {
+                        arrowY = CONFIG.GAME.HEIGHT - margin;
+                        arrowX = CONFIG.GAME.WIDTH / 2 + (normalizedDirX / normalizedDirY) * (CONFIG.GAME.HEIGHT / 2 - margin);
+                    } else {
+                        arrowY = margin;
+                        arrowX = CONFIG.GAME.WIDTH / 2 - (normalizedDirX / normalizedDirY) * (CONFIG.GAME.HEIGHT / 2 - margin);
+                    }
                 }
+
+                arrowX = Math.max(margin, Math.min(CONFIG.GAME.WIDTH - margin, arrowX));
+                arrowY = Math.max(margin, Math.min(CONFIG.GAME.HEIGHT - margin, arrowY));
+
+                arrow.x = arrowX;
+                arrow.y = arrowY;
+                arrow.rotation = Math.atan2(normalizedDirY, normalizedDirX) + Math.PI;
             } else {
-                if (normalizedDirY > 0) {
-                    arrowY = CONFIG.GAME.HEIGHT - margin;
-                    arrowX = CONFIG.GAME.WIDTH / 2 + (normalizedDirX / normalizedDirY) * (CONFIG.GAME.HEIGHT / 2 - margin);
-                } else {
-                    arrowY = margin;
-                    arrowX = CONFIG.GAME.WIDTH / 2 - (normalizedDirX / normalizedDirY) * (CONFIG.GAME.HEIGHT / 2 - margin);
-                }
+                arrow.visible = false;
             }
-            
-            arrowX = Math.max(margin, Math.min(CONFIG.GAME.WIDTH - margin, arrowX));
-            arrowY = Math.max(margin, Math.min(CONFIG.GAME.HEIGHT - margin, arrowY));
-            
-            this.elements.earthArrow.x = arrowX;
-            this.elements.earthArrow.y = arrowY;
-            this.elements.earthArrow.rotation = Math.atan2(normalizedDirY, normalizedDirX) + Math.PI;
-        } else {
-            this.elements.earthArrow.visible = false;
-        }
+        });
     }
 }
 
@@ -628,8 +675,8 @@ class Game {
             // Update UI
             this.uiManager.updateSpeed(this.player.getSpeed());
             this.uiManager.updateStarCount(starStats.visible, starStats.total, starStats.checked);
-            // Optionally, update arrow for the closest planet
-            this.uiManager.updateEarthArrow(this.planets[0], this.camera);
+            // Update arrows for all planets
+            this.uiManager.updatePlanetArrows(this.planets, this.camera);
         });
 
         // Star animation loop
