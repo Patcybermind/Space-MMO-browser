@@ -607,6 +607,51 @@ class UIManager {
     }
 }
 
+// Multiplayer Player Class
+class RemotePlayer {
+    constructor(app, world, id, x, y, color = 0x8888ff) {
+        this.app = app;
+        this.world = world;
+        this.id = id;
+        this.x = x;
+        this.y = y;
+        this.color = color;
+        this.sprite = null;
+        this.createSprite();
+    }
+
+    createSprite() {
+        const graphics = new PIXI.Graphics();
+        graphics.moveTo(-15, 0);
+        graphics.lineTo(15, -10);
+        graphics.lineTo(15, 10);
+        graphics.lineTo(-15, 0);
+        graphics.fill(this.color);
+        graphics.stroke({ width: 2, color: 0xffffff });
+
+        const texture = this.app.renderer.generateTexture(graphics);
+        this.sprite = new PIXI.Sprite(texture);
+        this.sprite.anchor.set(0.5);
+        this.sprite.x = this.x;
+        this.sprite.y = this.y;
+        this.sprite.zIndex = 2;
+        this.world.addChild(this.sprite);
+    }
+
+    updatePosition(x, y) {
+        this.x = x;
+        this.y = y;
+        this.sprite.x = x;
+        this.sprite.y = y;
+    }
+
+    destroy() {
+        if (this.sprite && this.sprite.parent) {
+            this.sprite.parent.removeChild(this.sprite);
+        }
+    }
+}
+
 // Main Game Class
 class Game {
     constructor() {
@@ -619,6 +664,11 @@ class Game {
         this.inputManager = null;
         this.camera = null;
         this.uiManager = null;
+
+        // Multiplayer
+        this.socket = null;
+        this.remotePlayers = {};
+        this.lastSent = 0;
     }
 
     async init() {
@@ -634,6 +684,7 @@ class Game {
         this.setupContainers();
         this.createGameObjects();
         this.setupGameLoop();
+        this.setupMultiplayer();
     }
 
     setupContainers() {
@@ -677,12 +728,73 @@ class Game {
             this.uiManager.updateStarCount(starStats.visible, starStats.total, starStats.checked);
             // Update arrows for all planets
             this.uiManager.updatePlanetArrows(this.planets, this.camera);
+
+            // Multiplayer: send position at most every 30ms
+            if (this.socket && performance.now() - this.lastSent > 30) {
+                this.socket.emit('move', {
+                    dx: this.player.x - (this.lastX || this.player.x),
+                    dy: this.player.y - (this.lastY || this.player.y)
+                });
+                this.lastX = this.player.x;
+                this.lastY = this.player.y;
+                this.lastSent = performance.now();
+            }
         });
 
         // Star animation loop
         this.app.ticker.add(() => {
             this.starSystem.animate();
         });
+    }
+
+    setupMultiplayer() {
+        this.socket = io();
+
+        // Send initial position to server
+        this.socket.emit('initPosition', {
+            x: this.player.x,
+            y: this.player.y
+        });
+
+        // On connect, receive all current players
+        this.socket.on('currentPlayers', (players) => {
+            Object.entries(players).forEach(([id, data]) => {
+                if (id === this.socket.id) return;
+                this.addRemotePlayer(id, data.x, data.y);
+            });
+        });
+
+        // New player joined
+        this.socket.on('newPlayer', (data) => {
+            if (data.id !== this.socket.id) {
+                this.addRemotePlayer(data.id, data.x, data.y);
+            }
+        });
+
+        // Player moved
+        this.socket.on('playerMoved', (data) => {
+            if (data.id !== this.socket.id && this.remotePlayers[data.id]) {
+                this.remotePlayers[data.id].updatePosition(data.x, data.y);
+            }
+        });
+
+        // Player disconnected
+        this.socket.on('playerDisconnected', (id) => {
+            if (this.remotePlayers[id]) {
+                this.remotePlayers[id].destroy();
+                delete this.remotePlayers[id];
+            }
+        });
+    }
+
+    addRemotePlayer(id, x, y) {
+        if (this.remotePlayers[id]) return;
+        // Assign a color based on id hash for variety
+        let color = 0x8888ff;
+        if (id) {
+            color = 0x8888ff + (parseInt(id.slice(-3), 16) % 0x777777);
+        }
+        this.remotePlayers[id] = new RemotePlayer(this.app, this.world, id, x, y, color);
     }
 }
 

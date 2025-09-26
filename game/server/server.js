@@ -1,39 +1,39 @@
-// server.js
 const express = require('express');
+const http = require('http');
+const { Server } = require('socket.io');
+
 const app = express();
-const server = require('http').createServer(app);
-const io = require('socket.io')(server);
+const server = http.createServer(app);
+const io = new Server(server);
 
-const PORT = 3000;
-
-let players = {};
-
-app.use(express.static('public'));
+const players = {};
 
 io.on('connection', (socket) => {
-  console.log('Player connected:', socket.id);
+    // Wait for client to send initial position
+    socket.on('initPosition', (data) => {
+        players[socket.id] = { x: data.x, y: data.y };
+        socket.emit('currentPlayers', players);
+        socket.broadcast.emit('newPlayer', { id: socket.id, x: data.x, y: data.y });
+    });
 
-  // Add new player
-  players[socket.id] = { x: 100, y: 100 };
+    // Player moves
+    socket.on('move', (data) => {
+        if (players[socket.id]) {
+            players[socket.id].x += data.dx;
+            players[socket.id].y += data.dy;
+            io.emit('playerMoved', { id: socket.id, x: players[socket.id].x, y: players[socket.id].y });
+        }
+    });
 
-  // Send current state
-  socket.emit('currentPlayers', players);
-  socket.broadcast.emit('newPlayer', { id: socket.id, ...players[socket.id] });
-
-  // Movement
-  socket.on('move', (data) => {
-    if (players[socket.id]) {
-      players[socket.id].x += data.dx;
-      players[socket.id].y += data.dy;
-      io.emit('playerMoved', { id: socket.id, ...players[socket.id] });
-    }
-  });
-
-  socket.on('disconnect', () => {
-    console.log('Player disconnected:', socket.id);
-    delete players[socket.id];
-    io.emit('playerDisconnected', socket.id);
-  });
+    // Player disconnects
+    socket.on('disconnect', () => {
+        delete players[socket.id];
+        io.emit('playerDisconnected', socket.id);
+    });
 });
 
-server.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
+app.use(express.static('../public')); // Adjust path if needed
+
+server.listen(3000, () => {
+    console.log('Server running on http://localhost:3000');
+});
